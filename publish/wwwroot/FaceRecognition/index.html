@@ -1,0 +1,340 @@
+﻿@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nhận Diện Khuôn Mặt - Huy Phan</title>
+    <script src="https://raw.githack.com/vladmandic/face-api/master/dist/face-api.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h2 {
+            color: #28a745;
+            margin-bottom: 20px;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: auto;
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,.15);
+        }
+
+        .tabs {
+            display: flex;
+            background: #333;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 18px;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            background: #555;
+        }
+
+            .tab.active {
+                background: #28a745;
+            }
+
+        .content {
+            padding: 30px;
+            display: none;
+        }
+
+            .content.active {
+                display: block;
+            }
+
+        .video-box {
+            width: 100%;
+            max-width: 900px;
+            height: 520px;
+            margin: 20px auto;
+            border: 6px solid #28a745;
+            border-radius: 15px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        button {
+            padding: 14px 30px;
+            margin: 10px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            min-width: 200px;
+        }
+
+            button:hover {
+                background: #218838;
+            }
+
+            button.stop {
+                background: #dc3545;
+            }
+
+                button.stop:hover {
+                    background: #c82333;
+                }
+
+        input[type=text] {
+            padding: 12px;
+            width: 300px;
+            font-size: 18px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+        }
+
+        .status {
+            font-size: 20px;
+            font-weight: bold;
+            margin: 20px;
+            color: #28a745;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.9);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+
+            .modal-content h3 {
+                color: #28a745;
+                font-size: 32px;
+            }
+    </style>
+</head>
+<body>
+    <h2>HỆ THỐNG NHẬN DIỆN KHUÔN MẶT - ASP.NET CORE</h2>
+    <div class="container">
+        <div class="tabs">
+            <div class="tab active" data-tab="recognize">QUÉT KHUÔN MẶT</div>
+            <div class="tab" data-tab="register">ĐĂNG KÝ MỚI</div>
+        </div>
+
+        <div id="recognize" class="content active">
+            <h3>Nhìn vào camera để nhận diện</h3>
+            <div class="video-box"><video id="videoRecognize" autoplay muted playsinline></video></div>
+            <button id="btnStartRec">BẬT CAMERA & QUÉT</button>
+            <div id="recognitionControls" style="display:none;">
+                <p style="font-size:28px;color:#28a745;font-weight:bold;">NHẬN DIỆN THÀNH CÔNG!</p>
+                <button onclick="continueRecognition()">QUÉT NGƯỜI KHÁC</button>
+                <button class="stop" onclick="stopRecognition()">DỪNG LẠI</button>
+            </div>
+            <p id="recognizeStatus" class="status">Đang tải mô hình AI... (20-40s lần đầu)</p>
+        </div>
+
+        <div id="register" class="content">
+            <h3>Đăng ký khuôn mặt mới</h3>
+            <input type="text" id="fullName" placeholder="Nhập họ và tên"><br><br>
+            <div class="video-box"><video id="videoRegister" autoplay muted playsinline></video></div>
+            <button onclick="startCameraRegister()">BẬT CAMERA</button>
+            <button onclick="captureFromCamera()">CHỤP & LƯU KHUÔN MẶT</button>
+            <p id="registerStatus" class="status">Sẵn sàng đăng ký</p>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <h3>THÀNH CÔNG!</h3>
+            <div id="modalInfo" style="font-size:24px"></div><br>
+            <button id="closeModal">Đóng</button>
+        </div>
+    </div>
+
+    <script>
+        const MODEL_URL = '/models'; // Thư mục models phải đặt trong wwwroot/models
+        let stream = null;
+        let modelsLoaded = false;
+        let recognitionInterval = null;
+
+        // ------------------- TẢI MÔ HÌNH -------------------
+        async function loadModels() {
+            if (modelsLoaded) return;
+            document.getElementById('recognizeStatus').innerHTML = "Đang tải AI... (20-40s lần đầu)";
+            await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+            modelsLoaded = true;
+            document.getElementById('recognizeStatus').innerHTML = "<span style='color:green'>SẴN SÀNG QUÉT!</span>";
+            document.getElementById('registerStatus').innerHTML = "<span style='color:green'>SẴN SÀNG ĐĂNG KÝ!</span>";
+        }
+
+        // ------------------- NÉN DESCRIPTOR -------------------
+        function compressDescriptor(desc) {
+            const buf = new ArrayBuffer(256);
+            const view = new DataView(buf);
+            desc.forEach((val, i) => view.setInt16(i * 2, Math.round(val * 10000), true));
+            return btoa(String.fromCharCode(...new Uint8Array(buf)));
+        }
+
+        // ------------------- LƯU KHUÔN MẶT -------------------
+        async function saveFace(name, descriptor) {
+            const data = new URLSearchParams();
+            data.append('FullName', name);
+            data.append('FaceDescriptor', compressDescriptor(descriptor));
+            const res = await fetch('/api/FaceRecognition/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: data
+            });
+            return res.ok;
+        }
+
+        // ------------------- NHẬN DIỆN -------------------
+        async function recognizeFace() {
+            const video = document.getElementById('videoRecognize');
+            const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
+            if (!detection) return;
+
+            const data = new URLSearchParams();
+            data.append('FaceDescriptor', compressDescriptor(detection.descriptor));
+
+            const res = await fetch('/api/FaceRecognition/recognize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: data
+            });
+
+            if (res.ok) {
+                const json = await res.json();
+                if (json.success && json.fullName) {
+                    clearInterval(recognitionInterval);
+                    document.getElementById('recognizeStatus').innerHTML = `<span style="color:green;font-size:28px">XIN CHÀO ${json.fullName.toUpperCase()}!</span>`;
+                    document.getElementById('recognitionControls').style.display = 'block';
+                    document.getElementById('modalInfo').innerHTML = `Chào mừng <strong>${json.fullName}</strong> đã đến!`;
+                    document.getElementById('modal').style.display = 'flex';
+                }
+            }
+        }
+
+        // ------------------- CAMERA CHUNG -------------------
+        async function getCameraStream() {
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            return stream;
+        }
+
+        // Tab QUÉT
+        async function startRecognition() {
+            await loadModels();
+            const video = document.getElementById('videoRecognize');
+            video.srcObject = await getCameraStream();
+            clearInterval(recognitionInterval);
+            recognitionInterval = setInterval(recognizeFace, 800);
+        }
+
+        // Tab ĐĂNG KÝ
+        async function startCameraRegister() {
+            await loadModels();
+            const video = document.getElementById('videoRegister');
+            video.srcObject = await getCameraStream();
+        }
+
+        async function captureFromCamera() {
+            const name = document.getElementById('fullName').value.trim();
+            if (!name) return alert("Vui lòng nhập họ tên!");
+
+            const video = document.getElementById('videoRegister');
+            const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
+            if (!detection) return alert("Không phát hiện khuôn mặt! Hãy nhìn thẳng vào camera.");
+
+            if (await saveFace(name, detection.descriptor)) {
+                document.getElementById('modalInfo').innerHTML = `Đã đăng ký thành công <strong>${name}</strong>!`;
+                document.getElementById('modal').style.display = 'flex';
+                document.getElementById('fullName').value = '';
+            } else {
+                alert("Lưu thất bại, vui lòng thử lại!");
+            }
+        }
+
+        function continueRecognition() {
+            document.getElementById('recognitionControls').style.display = 'none';
+            recognitionInterval = setInterval(recognizeFace, 800);
+        }
+
+        function stopRecognition() {
+            clearInterval(recognitionInterval);
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+                stream = null;
+            }
+            document.getElementById('recognitionControls').style.display = 'none';
+            document.getElementById('videoRecognize').srcObject = null;
+            document.getElementById('recognizeStatus').innerHTML = "<span style='color:green'>SẴN SÀNG QUÉT!</span>";
+        }
+
+        // ------------------- CHUYỂN TAB -------------------
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.getAttribute('data-tab');
+
+                document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+                document.getElementById(tabName).classList.add('active');
+                tab.classList.add('active');
+
+                // Tự động bật camera khi chuyển sang tab quét
+                if (tabName === 'recognize') {
+                    setTimeout(startRecognition, 300);
+                }
+            });
+        });
+
+        // ------------------- ĐÓNG MODAL (không còn lỗi event deprecated) -------------------
+        const modal = document.getElementById('modal');
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal || e.target.id === 'closeModal') {
+                modal.style.display = 'none';
+            }
+        });
+
+        // ------------------- KHỞI ĐỘNG -------------------
+        window.onload = async () => {
+            await loadModels();
+            // Mở mặc định tab "QUÉT KHUÔN MẶT"
+            document.querySelector('.tab[data-tab="recognize"]').click();
+        };
+    </script>
+</body>
+</html>
